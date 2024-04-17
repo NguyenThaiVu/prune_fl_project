@@ -32,12 +32,15 @@ In the future, we plan to run on the CELEB dataset with complex (Residual block)
 
 | Dataset | Number of clients | Number of categories |Image size 
 | --- | --- | --- | --- | 
-| FEMNIST | 3 383 | 10 | 28 x 28 |
+| FEMNIST | 3 383 | 62 | 28 x 28 |
 
 # 5. Performance
 
+- FL round: Number of FL training round.
+- Number client: Number (or percentage) of clients selected per round.
+- Local epoch: Number of local epochs each client train locally for FedAvg.
+- Local batch: batch size for each client train locally.
 
-
-| Dataset | FL training round | Max selected percent client | Accuracy |
-| --- | --- | --- | --- |
-| FEMNIST | 100 | 10% | 96.10 |
+| Dataset | FL round | Number client | Local epoch | Local batch | Accuracy |
+| --- | --- | --- | --- | --- | --- |
+| FEMNIST | 100 | 10% | 10 | 32 | 74.22% |

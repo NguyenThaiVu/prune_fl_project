@@ -1,0 +1,7 @@
+keras==2.14.0
+matplotlib==3.5.1
+numpy==1.25.2
+numpy==1.21.5
+tensorflow==2.14.1
+tensorflow_federated==0.75.0
+opencv-python==4.7.0

@@ -1,10 +1,16 @@
 import os
 import numpy as np
+import cv2
 from tensorflow import keras
 from keras.utils import to_categorical
 
 
-def Get_Image_and_Label_from_Client(client_dataset, dataset_name='mnist'):
+def cut_redundant_background(image, left_margin = 5, right_margin = 20):
+    image = image[left_margin:right_margin, left_margin:right_margin]
+    return image
+
+
+def Get_Image_and_Label_from_Client(client_dataset, dataset_name='mnist', target_size=None):
     """
     This function extract list_images and list_labels from client_dataset
     Parameters:
@@ -27,6 +33,11 @@ def Get_Image_and_Label_from_Client(client_dataset, dataset_name='mnist'):
         if dataset_name.lower() == 'mnist':
             X = sample['pixels'].numpy()
             y = sample['label'].numpy()
+    
+            original_shape = X.shape
+            X = cut_redundant_background(X)
+            X = cv2.resize(X, original_shape)
+
         if dataset_name.lower() == 'celeb': 
             X = sample['image'].numpy().astype(np.uint8)
             y = sample['male'].numpy().astype(np.int8)
@@ -61,7 +72,7 @@ def Create_Clients_Data(tff_dataset, dataset_name='mnist'):
         
         if list_X.ndim == 3: list_X = np.expand_dims(list_X, axis=-1)  # Just in case the input image is gray scale (28,28)
 
-        if dataset_name.lower() == 'mnist':  list_y = to_categorical(list_y, num_classes=10)
+        if dataset_name.lower() == 'mnist':  list_y = to_categorical(list_y, num_classes=62)
         if dataset_name.lower() == 'celeb':  list_y = to_categorical(list_y, num_classes=2)
         
         client_data = {'client_name': client_name, 'list_X': list_X, 'list_y': list_y}

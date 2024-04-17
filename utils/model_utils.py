@@ -12,7 +12,7 @@ from keras.datasets import mnist, cifar10
 from keras.utils import to_categorical
 from keras.callbacks import Callback, EarlyStopping
 from keras.layers import Dense, Activation, Conv2D, Dropout, BatchNormalization, Flatten, Input, MaxPooling2D, ReLU, DepthwiseConv2D, GlobalAveragePooling2D
-
+from keras.utils import plot_model
 from tensorflow.python.framework.convert_to_constants import convert_variables_to_constants_v2_as_graph
 
 
@@ -39,23 +39,24 @@ def FedAvg(global_model, list_client_model_weight, list_client_scales):
     return avg_weights
 
 
-def Define_Simple_CNN_Model(input_shape, output_shape,\
-                 list_number_kernel, kernel_size=3,\
-                 max_pooling_step=2, dropout_rate=0.1, model_name=None):
+
+def Define_Simple_CNN_Model(input_shape, output_shape, list_number_filters, max_pooling_step=2, model_name=None):
     """
     This function create the simple CNN model. 
     """
-    
+
+    kernel_size = 5
     model = models.Sequential(name=model_name)
     model.add(Input(input_shape))
 
-    for number_kernel in list_number_kernel:
-        model.add(Conv2D(number_kernel, (kernel_size, kernel_size), use_bias=False))
-        model.add(BatchNormalization())
+    for (idx_filter, number_filter) in enumerate(list_number_filters):
+        model.add(Conv2D(number_filter, (kernel_size, kernel_size), name=f'prunable_conv_{idx_filter}'))
+        # model.add(BatchNormalization())
         model.add(Activation("relu"))
         model.add(MaxPooling2D(pool_size=max_pooling_step, strides=max_pooling_step))
 
-    model.add(layers.Flatten())
+    # model.add(layers.Flatten())
+    model.add(layers.GlobalAveragePooling2D())
     model.add(layers.Dense(output_shape, activation='softmax', name='classifier'))
     return model
 
@@ -78,27 +79,16 @@ def define_simple_model(name, input_shape):
 
 
 
-def calculate_zero_weights_percentage(model):
-    for layer in model.layers:
-        if isinstance(layer, layers.Dense) or isinstance(layer, layers.Conv2D): 
-            weights = layer.get_weights()[0] 
-            zero_weights_percentage = np.mean(weights == 0) * 100
-            print(f"Layer {layer.name}: {zero_weights_percentage:.2f}% of weights are 0")
-
-
-
 def get_flops_keras_model(model):
     '''
     Calculate FLOPS
     Parameters
     ----------
-    model : tf.keras.Model
-        Model for calculating FLOPS.
+    model (tf.keras.Model): Model for calculating FLOPS.
 
     Returns
     -------
-    flops.total_float_ops : int
-        Calculated FLOPS for the model
+    flops.total_float_ops (int): Calculated FLOPS for the model
     '''
     
     batch_size = 1
@@ -114,38 +104,79 @@ def get_flops_keras_model(model):
 
 
 
+# ===================================================== RESNET =====================================================
 
-# ================================ MOBILE NET =================================
-def mobilnet_block (x, filters, strides):
-    x = DepthwiseConv2D(kernel_size = 3, strides = strides, padding = 'same')(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-    x = Conv2D(filters = filters, kernel_size = 1, strides = 1)(x)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
+def residual_block(input_tensor, num_filters_1, num_filters_2, kernel_size=3, strides=2, idx_residual_block=None):
+    """
+    This function define the residual block, which is the architecture using in the ResNet
+    """
+
+    shortcut = input_tensor
+    
+    # First block
+    x = layers.Conv2D(num_filters_1, kernel_size, strides=strides, padding='same', name=f'prunable_conv_{idx_residual_block+1}')(input_tensor)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    
+    # Second block
+    num_filters_2 = input_tensor.shape[-1]
+    x = layers.Conv2D(num_filters_2, kernel_size, padding='same')(x)
+    x = layers.BatchNormalization()(x)
+    
+    # Adjusting shortcut dimension if necessary
+    if strides != 1 or shortcut.shape[-1] != num_filters_2:
+        shortcut = layers.Conv2D(num_filters_2, kernel_size=1, strides=strides, padding='same')(shortcut)
+        shortcut = layers.BatchNormalization()(shortcut)
+    
+    # Adding shortcut to main path
+    x = layers.Add()([x, shortcut])
+    x = layers.Activation('relu')(x)
     return x
 
-def define_mobilenet(input_shape, output_dims):
 
-    input_layer = Input(shape = input_shape)
-    x = Conv2D(filters = 32, kernel_size = 3, strides = 2, padding = 'same')(input_layer)
-    x = BatchNormalization()(x)
-    x = ReLU()(x)
-
-    # main part of the model
-    x = mobilnet_block(x, filters = 64, strides = 1)
-    x = mobilnet_block(x, filters = 128, strides = 2)
-    x = mobilnet_block(x, filters = 128, strides = 1)
-    x = mobilnet_block(x, filters = 256, strides = 2)
-    x = mobilnet_block(x, filters = 256, strides = 1)
-    x = mobilnet_block(x, filters = 512, strides = 2)
-    for _ in range (5):
-        x = mobilnet_block(x, filters = 512, strides = 1)
-        
-    x = mobilnet_block(x, filters = 1024, strides = 2)
-    x = mobilnet_block(x, filters = 1024, strides = 1)
-    x = GlobalAveragePooling2D()(x)
+def Define_ResNet_Model(input_shape, output_shape, list_number_filters=[8, 8, 16, 32, 64], max_pooling_step=2, model_name=None):
+    """
+    This function create the simple Residual Network model. 
+    """
+    inputs = layers.Input(shape=input_shape)
     
-    output_layer = Dense (units = output_dims, activation = 'softmax')(x)
-    mobilenet = models.Model(inputs=input_layer, outputs=output_layer)
-    return mobilenet
+    # Initial Convolutional Layer
+    x = layers.Conv2D(list_number_filters[0], kernel_size=3, strides=2, padding='same', name=f'prunable_conv_0')(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.Activation('relu')(x)
+    x = layers.MaxPooling2D(pool_size=max_pooling_step, strides=max_pooling_step, padding='same')(x)
+    
+    # Residual Blocks
+    for (idx_residual_block, number_filters) in enumerate(list_number_filters[1:]):
+        x = residual_block(x, num_filters_1=number_filters, num_filters_2=number_filters, strides=(2, 2), idx_residual_block=idx_residual_block)
+    
+    # Final Layers
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dense(output_shape, activation='softmax')(x)
+    
+    model = tf.keras.Model(inputs=inputs, outputs=x)
+    return model
+
+
+
+def Get_Model(model_type, input_shape, output_shape, list_number_filters, max_pooling_step=2, model_name=None):
+    """
+    This function take the model_type and return the corresponding model
+
+    * Parameters:
+        model_type (str): indicate the define model type, including ['vanilla_conv', 'resnet', 'xception'] 
+
+    * Return:
+        model (keras.Model): the selected model.
+    """
+
+    if model_type == 'vanilla_conv':
+        model = Define_Simple_CNN_Model(input_shape, output_shape, list_number_filters, max_pooling_step, model_name)
+    elif model_type == 'resnet':
+        model = Define_ResNet_Model(input_shape, output_shape, list_number_filters, max_pooling_step, model_name)
+    elif model_type == 'xception':
+        model = Define_ResNet_Model(input_shape, output_shape, list_number_filters, max_pooling_step, model_name)
+    else:
+        model = None
+
+    return model    
