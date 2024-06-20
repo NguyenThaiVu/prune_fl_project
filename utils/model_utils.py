@@ -11,7 +11,8 @@ from keras import layers, models
 from keras.datasets import mnist, cifar10
 from keras.utils import to_categorical
 from keras.callbacks import Callback, EarlyStopping
-from keras.layers import Dense, Activation, Conv2D, Dropout, BatchNormalization, Flatten, Input, MaxPooling2D, ReLU, DepthwiseConv2D, GlobalAveragePooling2D
+from keras.layers import Dense, Activation, Conv2D, Dropout, BatchNormalization, Flatten, Input,\
+                        MaxPooling2D, ReLU, DepthwiseConv2D, GlobalAveragePooling2D, Concatenate
 from keras.utils import plot_model
 from tensorflow.python.framework.convert_to_constants import convert_variables_to_constants_v2_as_graph
 
@@ -40,12 +41,11 @@ def FedAvg(global_model, list_client_model_weight, list_client_scales):
 
 
 
-def Define_Simple_CNN_Model(input_shape, output_shape, list_number_filters, max_pooling_step=2, model_name=None):
+def Define_Simple_CNN_Model(input_shape, output_shape, list_number_filters, kernel_size = 5, max_pooling_step=2, model_name=None):
     """
     This function create the simple CNN model. 
     """
 
-    kernel_size = 5
     model = models.Sequential(name=model_name)
     model.add(Input(input_shape))
 
@@ -95,7 +95,6 @@ def get_flops_keras_model(model):
 
     real_model = tf.function(model).get_concrete_function(tf.TensorSpec([batch_size] + model.inputs[0].shape[1:], model.inputs[0].dtype))
     frozen_func, graph_def = convert_variables_to_constants_v2_as_graph(real_model)
-
     run_meta = tf.compat.v1.RunMetadata()
     opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
     flops = tf.compat.v1.profiler.profile(graph=frozen_func.graph,run_meta=run_meta, cmd='op', options=opts)
@@ -151,11 +150,17 @@ def Define_ResNet_Model(input_shape, output_shape, list_number_filters=[8, 8, 16
         x = residual_block(x, num_filters_1=number_filters, num_filters_2=number_filters, strides=(2, 2), idx_residual_block=idx_residual_block)
     
     # Final Layers
-    x = layers.GlobalAveragePooling2D()(x)
+    # x = layers.GlobalAveragePooling2D()(x)
+    x = Flatten()(x)
     x = layers.Dense(output_shape, activation='softmax')(x)
     
     model = tf.keras.Model(inputs=inputs, outputs=x)
     return model
+
+
+def Count_Conv2d_Layers(model):
+    conv2d_count = sum(1 for layer in model.layers if isinstance(layer, Conv2D))
+    return conv2d_count
 
 
 
